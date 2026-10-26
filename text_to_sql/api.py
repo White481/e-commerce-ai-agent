@@ -27,6 +27,8 @@ class AskRequest(BaseModel):
 class AttemptOut(BaseModel):
     sql: str | None
     error: str | None
+    llm_ms: int | None
+    db_ms: int | None
 
 
 class AskResponse(BaseModel):

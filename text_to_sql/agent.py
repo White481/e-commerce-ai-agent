@@ -28,6 +28,8 @@ Status = Literal["ok", "cannot_answer", "error"]
 class Attempt:
     sql: str | None
     error: str | None = None
+    llm_ms: int | None = None
+    db_ms: int | None = None
 
 
 @dataclass
@@ -91,7 +93,7 @@ class TextToSQLAgent:
     def ask(self, question: str) -> Answer:
         started = time.monotonic()
         answer = self._ask(question.strip())
-        self.query_log.write(answer, int((time.monotonic() - started) * 1000))
+        self.query_log.write(answer, _ms_since(started))
         return answer
 
     def _ask(self, question: str) -> Answer:
@@ -108,10 +110,13 @@ class TextToSQLAgent:
 
         for _ in range(self.max_attempts):
             user = prompts.build_user_prompt(question, previous_sql, previous_error)
+            started = time.monotonic()
             try:
                 reply = self.llm.generate(system, user)
             except LLMError as e:
+                attempts.append(Attempt(None, str(e), llm_ms=_ms_since(started)))
                 return Answer("error", question, message=str(e), attempts=attempts)
+            llm_ms = _ms_since(started)
 
             reason = cannot_answer_reason(reply)
             if reason is not None:
@@ -120,21 +125,22 @@ class TextToSQLAgent:
             sql = extract_sql(reply)
             result = validator.validate(sql)
             if not result.ok:
-                attempts.append(Attempt(sql, result.error))
+                attempts.append(Attempt(sql, result.error, llm_ms))
                 previous_sql, previous_error = sql, result.error
                 continue
 
+            started = time.monotonic()
             try:
                 rows = self.executor.run(result.sql)
             except RetryableError as e:
-                attempts.append(Attempt(result.sql, str(e)))
+                attempts.append(Attempt(result.sql, str(e), llm_ms, _ms_since(started)))
                 previous_sql, previous_error = result.sql, str(e)
                 continue
             except NonRetryableError as e:
-                attempts.append(Attempt(result.sql, str(e)))
+                attempts.append(Attempt(result.sql, str(e), llm_ms, _ms_since(started)))
                 return Answer("error", question, sql=result.sql, message=str(e), attempts=attempts)
 
-            attempts.append(Attempt(result.sql))
+            attempts.append(Attempt(result.sql, None, llm_ms, _ms_since(started)))
             return Answer(
                 "ok",
                 question,
@@ -153,6 +159,10 @@ class TextToSQLAgent:
             message=f"No working query after {self.max_attempts} attempts. Last error: {previous_error}",
             attempts=attempts,
         )
+
+
+def _ms_since(started: float) -> int:
+    return int((time.monotonic() - started) * 1000)
 
 
 def cannot_answer_reason(reply: str) -> str | None:

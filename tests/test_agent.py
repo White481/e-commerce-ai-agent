@@ -230,3 +230,25 @@ def test_api_root_redirects_to_docs(client_and_executor):
 def test_api_schema(client_and_executor):
     client, _ = client_and_executor
     assert client.get("/schema").json()["schema"] == "marts"
+
+
+def test_attempts_record_llm_and_db_time():
+    answer = make_agent(FakeLLM(sql_reply("SELECT 1"))).ask("x")
+    assert answer.attempts[0].llm_ms is not None and answer.attempts[0].db_ms is not None
+
+
+def test_gemini_client_sends_thinking_level_and_timeout():
+    from text_to_sql.llm import GeminiClient
+
+    client = GeminiClient(api_key="test-key", model="m", timeout_ms=1234, thinking_level="low")
+    sent = {}
+
+    def fake_generate_content(**kwargs):
+        sent.update(kwargs)
+        return type("Response", (), {"text": "```sql\nSELECT 1\n```"})()
+
+    client._client.models.generate_content = fake_generate_content
+    assert client.generate("system", "user") == "```sql\nSELECT 1\n```"
+    assert sent["config"].thinking_config.thinking_level.value == "LOW"
+    assert sent["config"].temperature == 0
+    assert client._client._api_client._http_options.timeout == 1234

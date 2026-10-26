@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     llm_provider: str = "gemini"
     llm_model: str = ""
     gemini_api_key: SecretStr = SecretStr("")
+    llm_timeout_ms: int = 30000
+    # minimal / low / medium / high; empty = the model's default
+    llm_thinking_level: str = "low"
 
     agent_max_attempts: int = 3
     agent_row_limit: int = 200
