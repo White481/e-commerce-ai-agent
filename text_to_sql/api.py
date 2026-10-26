@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from text_to_sql.agent import QueryLog, Status, TextToSQLAgent
@@ -68,6 +69,10 @@ def create_app(build: Callable[[], TextToSQLAgent] = build_agent) -> FastAPI:
         yield
 
     app = FastAPI(title="E-commerce Text-to-SQL", lifespan=lifespan)
+
+    @app.get("/", include_in_schema=False)
+    def root() -> RedirectResponse:
+        return RedirectResponse("/docs")
 
     # Plain def handlers: DB and LLM calls block, so FastAPI runs them in its threadpool
     @app.post("/ask", response_model=AskResponse)

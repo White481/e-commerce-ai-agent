@@ -220,6 +220,13 @@ def test_api_health(client_and_executor):
     assert client.get("/health").status_code == 503
 
 
+def test_api_root_redirects_to_docs(client_and_executor):
+    client, _ = client_and_executor
+    response = client.get("/", follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"] == "/docs"
+
+
 def test_api_schema(client_and_executor):
     client, _ = client_and_executor
     assert client.get("/schema").json()["schema"] == "marts"
