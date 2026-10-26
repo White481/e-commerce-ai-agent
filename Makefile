@@ -9,7 +9,7 @@ agent-role:
 		-v schema="$${WAREHOUSE_SCHEMA:-marts}" -v db="$$POSTGRES_DB" \
 		< sql/create_readonly_role.sql
 
-agent:  # http://localhost:8000/docs
+agent:  # web UI http://localhost:8000, API docs /docs
 	uvicorn text_to_sql.api:app --reload --port 8000
 
 eval:  # needs GEMINI_API_KEY + LLM_MODEL; free tier allows ~20 requests/day per model

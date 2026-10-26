@@ -220,11 +220,21 @@ def test_api_health(client_and_executor):
     assert client.get("/health").status_code == 503
 
 
-def test_api_root_redirects_to_docs(client_and_executor):
+def test_api_root_serves_the_web_ui(client_and_executor):
     client, _ = client_and_executor
-    response = client.get("/", follow_redirects=False)
-    assert response.status_code == 307
-    assert response.headers["location"] == "/docs"
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert 'fetch("/ask"' in response.text
+
+
+def test_api_validate_never_executes(client_and_executor):
+    client, executor = client_and_executor
+    blocked = client.post("/validate", json={"sql": "DELETE FROM fact_sales"}).json()
+    assert blocked["ok"] is False and "Only SELECT" in blocked["error"]
+    allowed = client.post("/validate", json={"sql": "select * from fact_sales"}).json()
+    assert allowed == {"ok": True, "sql": "SELECT * FROM marts.fact_sales LIMIT 200", "error": None}
+    assert executor.ran == []
 
 
 def test_api_schema(client_and_executor):

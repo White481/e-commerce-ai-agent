@@ -91,11 +91,21 @@ to the pool (tested: without it, `default_transaction_read_only` stayed `off` fo
 | Method | Path | |
 |---|---|---|
 | `POST` | `/ask` | `{"question": "..."}` (1–500 chars) → answer as above |
+| `POST` | `/validate` | `{"sql": "..."}` → what the validator does with any SQL; nothing is executed |
 | `GET` | `/schema` | the schema context sent to the LLM |
 | `POST` | `/schema/refresh` | re-read the catalog after the warehouse changes |
 | `GET` | `/health` | `503` if the database is unreachable |
 
-Interactive docs at `http://localhost:8000/docs` (`/` redirects there).
+**Web UI** at `http://localhost:8000`, with three tabs:
+
+- **Ask**: question in, answer with the generated SQL and the result table. "How it got there" lists
+  each attempt (SQL, the error sent back to the LLM, LLM/DB time) and every LLM call behind it, so
+  retries and model fallbacks are visible. `/?q=<question>` asks on load, for shareable links.
+- **Guardrail**: paste any SQL, including attacks, and see whether the validator allows it and the
+  exact SQL that would run (schema-qualified, `LIMIT` added). Nothing is executed.
+- **Schema**: exactly what the LLM sees.
+
+Interactive API docs at `http://localhost:8000/docs`.
 
 ## Run it
 
@@ -109,7 +119,7 @@ python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
 make agent-role               # create/refresh the read-only analyst_ro role (idempotent)
-make agent                    # http://localhost:8000/docs
+make agent                    # web UI at http://localhost:8000, API docs at /docs
 make test && make lint
 ```
 

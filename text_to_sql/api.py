@@ -1,4 +1,4 @@
-"""HTTP API for the agent:  make agent  ->  http://localhost:8000/docs
+"""HTTP API and web UI for the agent:  make agent  ->  http://localhost:8000 (API docs at /docs)
 
 The agent is built at startup (DB engine, schema, LLM), not at import, so
 create_app(build=...) can hand tests a fake agent.
@@ -6,10 +6,11 @@ create_app(build=...) can hand tests a fake agent.
 
 from collections.abc import Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from text_to_sql.agent import QueryLog, Status, TextToSQLAgent
@@ -18,6 +19,16 @@ from text_to_sql.executor import QueryExecutor, create_agent_engine
 from text_to_sql.llm import create_llm
 from text_to_sql.schema_provider import SchemaProvider
 from text_to_sql.validator import DEFAULT_BLOCKED_FUNCTIONS
+
+
+class ValidateRequest(BaseModel):
+    sql: str = Field(min_length=1, max_length=5000)
+
+
+class ValidateResponse(BaseModel):
+    ok: bool
+    sql: str | None
+    error: str | None
 
 
 class AskRequest(BaseModel):
@@ -81,8 +92,8 @@ def create_app(build: Callable[[], TextToSQLAgent] = build_agent) -> FastAPI:
     app = FastAPI(title="E-commerce Text-to-SQL", lifespan=lifespan)
 
     @app.get("/", include_in_schema=False)
-    def root() -> RedirectResponse:
-        return RedirectResponse("/docs")
+    def index() -> FileResponse:
+        return FileResponse(Path(__file__).parent / "static" / "index.html")
 
     # Plain def handlers: DB and LLM calls block, so FastAPI runs them in its threadpool
     @app.post("/ask", response_model=AskResponse)
@@ -90,6 +101,11 @@ def create_app(build: Callable[[], TextToSQLAgent] = build_agent) -> FastAPI:
         if not body.question.strip():
             raise HTTPException(422, "question is empty")
         return agent.ask(body.question)
+
+    @app.post("/validate", response_model=ValidateResponse)
+    def validate(body: ValidateRequest, agent: AgentDep):
+        """Run only the validator on any SQL: nothing is executed. Used by the UI's Guardrail tab."""
+        return agent.validator().validate(body.sql)
 
     @app.get("/schema")
     def schema(agent: AgentDep) -> dict[str, str]:

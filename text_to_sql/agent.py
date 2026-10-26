@@ -99,14 +99,17 @@ class TextToSQLAgent:
         self.query_log.write(answer, _ms_since(started))
         return answer
 
-    def _ask(self, question: str) -> Answer:
-        # Built per question so a schema refresh() is picked up
-        validator = SQLValidator(
+    def validator(self) -> SQLValidator:
+        # Built per call so a schema refresh() is picked up
+        return SQLValidator(
             self.schema,
             self.schema_provider.table_names,
             self.executor.row_limit,
             self.blocked_functions,
         )
+
+    def _ask(self, question: str) -> Answer:
+        validator = self.validator()
         system = prompts.build_system_prompt(self.schema, self.schema_provider.get_context())
         attempts: list[Attempt] = []
         previous_sql = previous_error = None

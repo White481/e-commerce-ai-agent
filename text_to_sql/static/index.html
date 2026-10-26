@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>E-commerce AI Agent</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --surface: #ffffff; --surface-2: #f0f2f5; --border: #dde1e6;
+    --text: #1b1f24; --muted: #5f6b7a; --accent: #2457d6; --accent-text: #ffffff;
+    --ok: #1a7f37; --ok-bg: #e6f4ea; --warn: #9a6700; --warn-bg: #fff4d6;
+    --bad: #c62828; --bad-bg: #fdecea; --code-bg: #0f1720; --code-text: #e6edf3;
+    --radius: 10px; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117; --surface: #161b22; --surface-2: #1f2630; --border: #30363d;
+      --text: #e6edf3; --muted: #8b949e; --accent: #4c8dff; --accent-text: #0d1117;
+      --ok: #3fb950; --ok-bg: #12261a; --warn: #d29922; --warn-bg: #2b2111;
+      --bad: #f85149; --bad-bg: #2d1414; --code-bg: #0b0f14; --code-text: #e6edf3;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", "Noto Sans Thai", sans-serif;
+  }
+  main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 64px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 16px; }
+  h1 { font-size: 22px; margin: 0; }
+  .sub { color: var(--muted); font-size: 14px; }
+  .health { margin-left: auto; font-size: 13px; color: var(--muted); }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 6px; }
+  .dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); }
+
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+  .tab {
+    background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted);
+    padding: 8px 12px; font: inherit; cursor: pointer;
+  }
+  .tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+  .card + .card { margin-top: 16px; }
+  form { display: flex; gap: 8px; }
+  input[type=text], textarea {
+    flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+  }
+  textarea { width: 100%; min-height: 96px; font-family: var(--mono); font-size: 13px; resize: vertical; }
+  input:focus, textarea:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button.primary {
+    background: var(--accent); color: var(--accent-text); border: 0; border-radius: 8px;
+    padding: 10px 16px; font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap;
+  }
+  button.primary:disabled { opacity: .6; cursor: progress; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .chip {
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 999px; padding: 4px 10px; font: inherit; font-size: 13px; cursor: pointer;
+  }
+  .chip:hover { border-color: var(--accent); }
+  .chip.danger { color: var(--bad); }
+
+  .status-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 12px; }
+  .badge { font-size: 12px; font-weight: 700; letter-spacing: .02em; padding: 3px 8px; border-radius: 6px; text-transform: uppercase; }
+  .badge.ok { color: var(--ok); background: var(--ok-bg); }
+  .badge.cannot_answer { color: var(--warn); background: var(--warn-bg); }
+  .badge.error { color: var(--bad); background: var(--bad-bg); }
+  .meta { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .message { margin: 0 0 12px; }
+
+  .label { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin: 12px 0 6px; display: flex; justify-content: space-between; align-items: center; }
+  pre {
+    margin: 0; background: var(--code-bg); color: var(--code-text); border-radius: 8px;
+    padding: 12px; font: 13px/1.5 var(--mono); white-space: pre-wrap; word-break: break-word;
+  }
+  .copy { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 6px; font: inherit; font-size: 12px; padding: 2px 8px; cursor: pointer; text-transform: none; letter-spacing: 0; }
+
+  .table-wrap { overflow: auto; max-height: 480px; border: 1px solid var(--border); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
+  th { position: sticky; top: 0; background: var(--surface-2); font-weight: 600; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr:last-child td { border-bottom: 0; }
+
+  details summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+  .attempt { border-left: 3px solid var(--border); padding: 4px 0 4px 12px; margin-top: 10px; }
+  .attempt .err { color: var(--bad); font-size: 13px; margin-top: 4px; }
+  .attempt .meta { margin: 0 0 6px; }
+  .attempt pre { font-size: 12px; }
+  .calls { margin: 6px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
+  .calls .err { display: inline; }
+  details { margin-top: 16px; }
+
+  .verdict { font-weight: 600; margin-bottom: 8px; }
+  .verdict.ok { color: var(--ok); } .verdict.bad { color: var(--bad); }
+  .hint { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
+  .empty { color: var(--muted); }
+  [hidden] { display: none !important; }
+
+  @media (max-width: 560px) {
+    form { flex-direction: column; }
+    .health { margin-left: 0; width: 100%; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>E-commerce AI Agent</h1>
+    <span class="sub">Ask the e-commerce warehouse in Thai or English</span>
+    <span class="health" id="health"><span class="dot"></span>checking database…</span>
+  </header>
+
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" aria-selected="true" data-tab="ask">Ask</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="guardrail">Guardrail</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="schema">Schema</button>
+  </div>
+
+  <!-- Ask -->
+  <section data-panel="ask">
+    <div class="card">
+      <form id="ask-form">
+        <input type="text" id="question" maxlength="500" autocomplete="off"
+               placeholder="e.g. ยอดขายรายเดือนปี 2011 / top 5 countries by revenue" required>
+        <button class="primary" id="ask-btn" type="submit">Ask</button>
+      </form>
+      <div class="chips" id="ask-examples"></div>
+    </div>
+    <div class="card" id="ask-result" hidden></div>
+  </section>
+
+  <!-- Guardrail -->
+  <section data-panel="guardrail" hidden>
+    <div class="card">
+      <p style="margin-top:0">Paste any SQL and see what the validator does with it — nothing is executed.
+        Only a single SELECT on the warehouse tables passes; a LIMIT is added or capped.</p>
+      <textarea id="sql" spellcheck="false" placeholder="SELECT * FROM marts.fact_sales"></textarea>
+      <div class="chips" id="sql-examples"></div>
+      <div style="margin-top:12px"><button class="primary" id="validate-btn">Validate</button></div>
+    </div>
+    <div class="card" id="validate-result" hidden></div>
+  </section>
+
+  <!-- Schema -->
+  <section data-panel="schema" hidden>
+    <div class="card">
+      <p style="margin-top:0">This is exactly what the LLM sees — schema and business notes only, never table rows.</p>
+      <pre id="schema-text">Loading…</pre>
+    </div>
+  </section>
+</main>
+
+<script>
+const ASK_EXAMPLES = [
+  "Top 5 countries by revenue",
+  "ยอดขายรายเดือนปี 2011",
+  "ลูกค้า 5 คนที่มียอดซื้อสุทธิสูงที่สุด",
+  "Return rate by country",
+  "Net revenue by day of the week",
+  "What is each customer's phone number?",
+];
+const SQL_EXAMPLES = [
+  ["SELECT * FROM fact_sales", false],
+  ["SELECT * FROM marts.fact_sales LIMIT 100000", false],
+  ["SELECT 1; DROP TABLE marts.fact_sales", true],
+  ["WITH d AS (DELETE FROM marts.fact_sales RETURNING *) SELECT * FROM d", true],
+  ["SELECT * FROM raw.online_retail", true],
+  ["SELECT * FROM pg_catalog.pg_shadow", true],
+  ["SELECT pg_sleep(60)", true],
+];
+const STATUS_TEXT = { ok: "Answered", cannot_answer: "Cannot answer", error: "Error" };
+
+const $ = (id) => document.getElementById(id);
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") node.className = v; else if (k === "text") node.textContent = v;
+    else if (k.startsWith("on")) node.addEventListener(k.slice(2), v); else node.setAttribute(k, v);
+  }
+  for (const c of children) if (c != null) node.append(c);
+  return node;
+}
+
+// Tabs
+let schemaLoaded = false;
+document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click", () => {
+  document.querySelectorAll(".tab").forEach((t) => t.setAttribute("aria-selected", t === tab));
+  document.querySelectorAll("[data-panel]").forEach((p) => p.hidden = p.dataset.panel !== tab.dataset.tab);
+  if (tab.dataset.tab === "schema" && !schemaLoaded) loadSchema();
+}));
+
+// Health
+fetch("/health").then((r) => r.json()).then((d) => {
+  const ok = d.status === "ok";
+  $("health").replaceChildren(el("span", { class: "dot " + (ok ? "ok" : "bad") }),
+    ok ? "database connected" : "database unreachable");
+}).catch(() => $("health").replaceChildren(el("span", { class: "dot bad" }), "API unreachable"));
+
+// Ask
+for (const q of ASK_EXAMPLES) {
+  $("ask-examples").append(el("button", { class: "chip", type: "button", text: q,
+    onclick: () => { $("question").value = q; ask(); } }));
+}
+$("ask-form").addEventListener("submit", (e) => { e.preventDefault(); ask(); });
+// Shareable link: /?q=<question> asks on load
+const initial = new URLSearchParams(location.search).get("q");
+if (initial) { $("question").value = initial; ask(); }
+
+async function ask() {
+  const question = $("question").value.trim();
+  if (!question) return;
+  const btn = $("ask-btn"), out = $("ask-result");
+  btn.disabled = true; btn.textContent = "Thinking…";
+  out.hidden = false; out.replaceChildren(el("p", { class: "empty", text: "Generating SQL…" }));
+  const started = performance.now();
+  try {
+    const res = await fetch("/ask", { method: "POST", headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({ question }) });
+    const data = await res.json();
+    if (!res.ok) renderError(out, data);
+    else renderAnswer(out, data, performance.now() - started);
+  } catch (err) {
+    renderError(out, { detail: "Could not reach the API." });
+  } finally {
+    btn.disabled = false; btn.textContent = "Ask";
+  }
+}
+
+function renderError(out, data) {
+  const detail = Array.isArray(data.detail) ? data.detail.map((d) => d.msg).join("; ") : data.detail;
+  out.replaceChildren(el("div", { class: "status-row" }, el("span", { class: "badge error", text: "Error" })),
+    el("p", { class: "message", text: detail || "Request failed." }));
+}
+
+function renderAnswer(out, d, elapsedMs) {
+  const n = d.attempts.length;
+  const model = [...d.attempts].reverse().find((a) => a.model)?.model;
+  const meta = [`${n} attempt${n === 1 ? "" : "s"}`, `${(elapsedMs / 1000).toFixed(1)} s`];
+  if (d.status === "ok") meta.unshift(`${d.row_count} row${d.row_count === 1 ? "" : "s"}${d.truncated ? " (truncated)" : ""}`);
+  if (model) meta.push(model);
+  const parts = [el("div", { class: "status-row" },
+    el("span", { class: "badge " + d.status, text: STATUS_TEXT[d.status] || d.status }),
+    el("span", { class: "meta", text: meta.join(" · ") }))];
+  if (d.message) parts.push(el("p", { class: "message", text: d.message }));
+  if (d.sql) parts.push(sqlBlock("Generated SQL", d.sql));
+  if (d.status === "ok") parts.push(el("div", { class: "label", text: "Result" }), table(d.columns, d.rows));
+  if (n) parts.push(attemptsDetails(d.attempts));
+  out.replaceChildren(...parts);
+}
+
+// Every SQL the LLM tried, why it was rejected, and each HTTP call to the LLM behind it
+function attemptsDetails(attempts) {
+  const calls = attempts.flatMap((a) => a.llm_calls);
+  const failed = calls.filter((c) => c.error).length;
+  const summary = `How it got there: ${attempts.length} attempt${attempts.length === 1 ? "" : "s"}, ` +
+    `${calls.length} LLM call${calls.length === 1 ? "" : "s"}${failed ? ` (${failed} failed)` : ""}`;
+  return el("details", {}, el("summary", { text: summary }), ...attempts.map((a, i) => {
+    const timing = [a.model, a.llm_ms != null && `LLM ${(a.llm_ms / 1000).toFixed(1)} s`,
+                    a.db_ms != null && `DB ${a.db_ms} ms`].filter(Boolean).join(" · ");
+    return el("div", { class: "attempt" },
+      el("p", { class: "meta", text: `Attempt ${i + 1}` + (timing ? ` · ${timing}` : "") }),
+      a.sql ? el("pre", { text: a.sql }) : null,
+      a.error ? el("div", { class: "err", text: a.error }) : null,
+      a.llm_calls.length > 1 || a.llm_calls.some((c) => c.error)
+        ? el("ul", { class: "calls" }, ...a.llm_calls.map((c) => el("li", {},
+            `${c.model} · ${(c.ms / 1000).toFixed(1)} s`,
+            c.error ? el("span", { class: "err", text: ` · ${c.error}` }) : " · ok")))
+        : null);
+  }));
+}
+
+function sqlBlock(title, sql) {
+  const copy = el("button", { class: "copy", type: "button", text: "Copy", onclick: () => {
+    navigator.clipboard?.writeText(sql).then(() => { copy.textContent = "Copied"; setTimeout(() => copy.textContent = "Copy", 1200); });
+  } });
+  return el("div", {}, el("div", { class: "label" }, el("span", { text: title }), copy), el("pre", { text: sql }));
+}
+
+function table(columns, rows) {
+  if (!rows.length) return el("p", { class: "empty", text: "No rows." });
+  const numeric = columns.map((_, i) => rows.every((r) => r[i] === null || typeof r[i] === "number"));
+  const fmt = (v) => v === null ? "NULL" : typeof v === "number"
+    ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : String(v);
+  return el("div", { class: "table-wrap" }, el("table", {},
+    el("thead", {}, el("tr", {}, ...columns.map((c, i) => el("th", { class: numeric[i] ? "num" : "", text: c })))),
+    el("tbody", {}, ...rows.map((r) => el("tr", {}, ...r.map((v, i) => el("td", { class: numeric[i] ? "num" : "", text: fmt(v) })))))));
+}
+
+// Guardrail
+for (const [sql, bad] of SQL_EXAMPLES) {
+  $("sql-examples").append(el("button", { class: "chip" + (bad ? " danger" : ""), type: "button", text: sql,
+    onclick: () => { $("sql").value = sql; validate(); } }));
+}
+$("validate-btn").addEventListener("click", validate);
+
+async function validate() {
+  const sql = $("sql").value, out = $("validate-result");
+  if (!sql.trim()) return;
+  out.hidden = false;
+  try {
+    const res = await fetch("/validate", { method: "POST", headers: { "Content-Type": "application/json" },
+                                           body: JSON.stringify({ sql }) });
+    const d = await res.json();
+    if (!res.ok) return renderError(out, d);
+    out.replaceChildren(
+      el("div", { class: "verdict " + (d.ok ? "ok" : "bad"), text: d.ok ? "✓ Allowed" : "✗ Blocked" }),
+      d.ok ? sqlBlock("SQL that would run", d.sql) : el("p", { class: "message", text: d.error }),
+      d.ok ? null : el("p", { class: "hint", text: "This error message is what the LLM receives on retry." }));
+  } catch (err) {
+    renderError(out, { detail: "Could not reach the API." });
+  }
+}
+
+// Schema
+async function loadSchema() {
+  try {
+    const d = await (await fetch("/schema")).json();
+    $("schema-text").textContent = d.context;
+    schemaLoaded = true;
+  } catch (err) {
+    $("schema-text").textContent = "Could not load the schema.";
+  }
+}
+</script>
+</body>
+</html>
