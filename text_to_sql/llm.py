@@ -10,6 +10,14 @@ from text_to_sql.config import Settings
 class LLMError(Exception):
     """The LLM call failed (network, quota, bad key). Not something a retry prompt fixes."""
 
+    def __init__(self, message: str, overloaded: bool = False):
+        super().__init__(message)
+        # Busy or rate-limited (429/5xx/timeout): another model may still answer
+        self.overloaded = overloaded
+
+
+_OVERLOADED_CODES = {429, 500, 503, 504}
+
 
 class LLMClient(Protocol):
     def generate(self, system: str, user: str) -> str: ...
@@ -44,12 +52,33 @@ class GeminiClient:
                 ),
             )
         except errors.APIError as e:
-            raise LLMError(f"LLM request failed ({e.code} {e.status}): {e.message}") from e
+            raise LLMError(
+                f"LLM request failed ({e.code} {e.status}): {e.message}",
+                overloaded=e.code in _OVERLOADED_CODES,
+            ) from e
         except httpx.TimeoutException as e:
-            raise LLMError(f"LLM request timed out after {self.timeout_ms / 1000:.0f}s") from e
+            raise LLMError(f"LLM request timed out after {self.timeout_ms / 1000:.0f}s", overloaded=True) from e
         except httpx.HTTPError as e:
             raise LLMError(f"LLM request failed: {type(e).__name__}") from e
         return response.text or ""
+
+
+class FallbackLLM:
+    """Try each model in order, moving on only when one is overloaded."""
+
+    def __init__(self, clients: list[LLMClient]):
+        self.clients = clients
+
+    def generate(self, system: str, user: str) -> str:
+        errors = []
+        for client in self.clients:
+            try:
+                return client.generate(system, user)
+            except LLMError as e:
+                if not e.overloaded:
+                    raise
+                errors.append(f"{getattr(client, 'model', '?')}: {e}")
+        raise LLMError("All models are busy. " + " | ".join(errors), overloaded=True)
 
 
 def create_llm(settings: Settings) -> LLMClient:
@@ -60,9 +89,14 @@ def create_llm(settings: Settings) -> LLMClient:
     key = settings.gemini_api_key.get_secret_value()
     if not key:
         raise ValueError("GEMINI_API_KEY is not set")
-    return GeminiClient(
-        api_key=key,
-        model=settings.llm_model,
-        timeout_ms=settings.llm_timeout_ms,
-        thinking_level=settings.llm_thinking_level,
-    )
+    models = [settings.llm_model, *settings.llm_fallback_model_list()]
+    clients = [
+        GeminiClient(
+            api_key=key,
+            model=model,
+            timeout_ms=settings.llm_timeout_ms,
+            thinking_level=settings.llm_thinking_level,
+        )
+        for model in models
+    ]
+    return clients[0] if len(clients) == 1 else FallbackLLM(clients)

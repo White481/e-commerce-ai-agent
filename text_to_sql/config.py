@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     llm_provider: str = "gemini"
     llm_model: str = ""
     gemini_api_key: SecretStr = SecretStr("")
+    # Comma-separated, tried in order when LLM_MODEL is overloaded (503/429/timeout)
+    llm_fallback_models: str = ""
     llm_timeout_ms: int = 30000
     # minimal / low / medium / high; empty = the model's default
     llm_thinking_level: str = "low"
@@ -45,6 +47,9 @@ class Settings(BaseSettings):
                 "AGENT_DB_USER must be a dedicated read-only role, not POSTGRES_USER"
             )
         return self
+
+    def llm_fallback_model_list(self) -> list[str]:
+        return [m.strip() for m in self.llm_fallback_models.split(",") if m.strip()]
 
     def agent_db_url(self) -> URL:
         return URL.create(

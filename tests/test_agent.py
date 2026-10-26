@@ -252,3 +252,36 @@ def test_gemini_client_sends_thinking_level_and_timeout():
     assert sent["config"].thinking_config.thinking_level.value == "LOW"
     assert sent["config"].temperature == 0
     assert client._client._api_client._http_options.timeout == 1234
+
+
+class FakeModel:
+    def __init__(self, model, outcome):
+        self.model, self.outcome, self.calls = model, outcome, 0
+
+    def generate(self, system, user):
+        self.calls += 1
+        if isinstance(self.outcome, Exception):
+            raise self.outcome
+        return self.outcome
+
+
+def test_fallback_moves_on_only_when_overloaded():
+    from text_to_sql.llm import FallbackLLM
+
+    busy = FakeModel("a", LLMError("503 UNAVAILABLE", overloaded=True))
+    ok = FakeModel("b", "SELECT 1")
+    assert FallbackLLM([busy, ok]).generate("s", "u") == "SELECT 1"
+
+    bad_key = FakeModel("a", LLMError("400 INVALID_ARGUMENT"))
+    unused = FakeModel("b", "SELECT 1")
+    with pytest.raises(LLMError, match="INVALID_ARGUMENT"):
+        FallbackLLM([bad_key, unused]).generate("s", "u")
+    assert unused.calls == 0
+
+
+def test_fallback_reports_every_busy_model():
+    from text_to_sql.llm import FallbackLLM
+
+    models = [FakeModel(m, LLMError("503", overloaded=True)) for m in ("a", "b")]
+    with pytest.raises(LLMError, match=r"All models are busy\. a: 503 \| b: 503"):
+        FallbackLLM(models).generate("s", "u")
