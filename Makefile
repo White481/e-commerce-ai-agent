@@ -1,4 +1,4 @@
-.PHONY: agent-role agent test lint
+.PHONY: agent-role agent eval eval-guardrails test lint
 
 # Values come from .env (AGENT_DB_PASSWORD is not in Git).
 # Runs psql inside the pipeline's Postgres container as its admin user.
@@ -11,6 +11,12 @@ agent-role:
 
 agent:  # http://localhost:8000/docs
 	uvicorn text_to_sql.api:app --reload --port 8000
+
+eval:  # needs GEMINI_API_KEY + LLM_MODEL; free tier allows ~20 requests/day per model
+	python -m evals.run_eval
+
+eval-guardrails:  # no LLM needed
+	python -m evals.run_eval --guardrails-only
 
 test:
 	pytest -q

@@ -79,6 +79,10 @@ Generated SQL is untrusted input. Each layer below holds even if the one before 
 with the validator skipped and the session's read-only default turned off, and the other schemas
 answer "permission denied".
 
+Any role may change its own session settings with `SELECT set_config(...)`, and a pooled connection
+would carry that into the next question. The engine runs `RESET ALL` whenever a connection returns
+to the pool (tested: without it, `default_transaction_read_only` stayed `off` for the next query).
+
 ## API
 
 | Method | Path | |
@@ -111,11 +115,45 @@ error, and LLM/DB time. Result rows are never logged.
 
 ## Tests
 
-- **Unit** (`test_validator.py`, `test_agent.py`): the validator against allowed and malicious SQL,
-  the retry loop, model fallback and the API, all with a fake LLM, schema and executor, so they run
+- **Unit** (`test_validator.py`, `test_agent.py`, `test_eval_compare.py`): the validator against allowed and malicious SQL,
+  the retry loop, model fallback, the API and eval scoring, all with a fake LLM, schema and executor, so they run
   in CI without a database or API key.
 - **Integration** (`test_executor_readonly.py`, marked `integration`): the real role and database.
   Skipped automatically when `AGENT_DB_PASSWORD` is not set or the database is unreachable.
+
+## Evaluation
+
+[`evals/questions.yaml`](evals/questions.yaml) holds 30 questions: 23 answerable (6 easy, 10 medium,
+7 hard, Thai and English), 3 that should get `CANNOT_ANSWER`, and 4 prompt-injection attempts. Each
+answerable question has a reference SQL query.
+
+The metric is **execution accuracy**: run the agent's SQL and the reference SQL, then compare the
+**result sets**. Numbers are rounded to 2 decimals, row order only counts when the reference has
+`ORDER BY`, and column names, column order and extra columns are ignored, but rows must stay
+aligned. Many different queries are correct, so this is fairer than comparing SQL text; it can
+still pass a wrong query that happens to return the same rows.
+
+```bash
+make eval              # needs GEMINI_API_KEY + LLM_MODEL; writes evals/results/<timestamp>.json
+make eval-guardrails   # no LLM needed
+```
+
+**Guardrail suite** (16 malicious queries: DDL/DML, `DELETE` inside a CTE, stacked statements,
+other schemas, `pg_shadow`, `pg_read_file`, `pg_sleep`, `set_config`, `COPY TO` a file):
+
+| Layer tested alone | Blocked |
+|---|---|
+| Validator | **16/16** |
+| Database, validator bypassed | **15/16** |
+
+The one the database runs is `SELECT set_config('default_transaction_read_only', 'off', false)`: a
+plain `SELECT` any role may call. It still can't write (the transaction is `READ ONLY` and the role
+has no write privilege), and the pool reset above stops it from reaching the next question.
+
+**Answer accuracy: pending.** The runner was checked with an oracle run (the reference SQL fed back
+as the LLM's answer scores 30/30), but the Gemini free tier allows about 20 requests per day per
+model, so a full run needs a paid key or several days. The table will be filled in from a complete
+run; incomplete runs are flagged in the summary instead of being reported.
 
 ## Design decisions
 
@@ -128,8 +166,7 @@ error, and LLM/DB time. Result rows are never logged.
 
 ## Limitations and next steps
 
-- Accuracy isn't measured yet. Next: an eval set of questions with reference SQL, scored by
-  comparing result sets (execution accuracy).
+- Answer accuracy isn't reported yet (see Evaluation).
 - The API has no authentication or rate limit; it is meant to run locally.
 - Gemini latency dominates (seconds per question vs. milliseconds in the database).
 - Next: a chat UI, a Dockerfile, and a contract test that fails CI when the `marts` columns the
