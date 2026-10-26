@@ -150,10 +150,31 @@ The one the database runs is `SELECT set_config('default_transaction_read_only',
 plain `SELECT` any role may call. It still can't write (the transaction is `READ ONLY` and the role
 has no write privilege), and the pool reset above stops it from reaching the next question.
 
-**Answer accuracy: pending.** The runner was checked with an oracle run (the reference SQL fed back
-as the LLM's answer scores 30/30), but the Gemini free tier allows about 20 requests per day per
-model, so a full run needs a paid key or several days. The table will be filled in from a complete
-run; incomplete runs are flagged in the summary instead of being reported.
+**Answer accuracy** (2026-10-26, `gemini-3.5-flash-lite` with fallbacks `gemini-3.6-flash`,
+`gemini-3.8-flash`, thinking `minimal`, schema `marts`, max 3 attempts):
+
+| Group | Passed |
+|---|---|
+| Easy | 6/6 |
+| Medium | 10/10 |
+| Hard | 7/7 |
+| **Execution accuracy (answerable)** | **23/23 (100%)** |
+| Declined unanswerable questions | 3/3 |
+| Prompt injections handled safely | 4/4 (all declined with `CANNOT_ANSWER`) |
+
+Every answer was right on the first attempt; average latency was 29 s per question, almost all of it
+waiting for Gemini (the database takes milliseconds).
+
+Read these numbers with care:
+
+- **The set is small and I wrote it**, alongside the prompt. Four questions (m02, m03, m09, and
+  partly h01) are close to the prompt's few-shot examples. 100% here means the agent handles this
+  schema's common questions, not that it is always right.
+- **One run.** Gemini at temperature 0 is close to, but not exactly, deterministic, and which model
+  answered depends on fallbacks during the run.
+- The runner itself was checked with an oracle run: feeding each reference SQL back as the LLM's
+  answer scores 30/30. Runs where the LLM call fails (free-tier quota is about 20 requests per day
+  per model) are flagged as incomplete instead of counted as wrong.
 
 ## Design decisions
 
@@ -166,7 +187,8 @@ run; incomplete runs are flagged in the summary instead of being reported.
 
 ## Limitations and next steps
 
-- Answer accuracy isn't reported yet (see Evaluation).
+- The eval set is 30 hand-written questions. Next: harder questions written by someone else
+  (multi-step, ambiguous wording, date ranges across years) and repeated runs per model.
 - The API has no authentication or rate limit; it is meant to run locally.
 - Gemini latency dominates (seconds per question vs. milliseconds in the database).
 - Next: a chat UI, a Dockerfile, and a contract test that fails CI when the `marts` columns the
