@@ -15,7 +15,7 @@ from typing import Any, Literal
 
 from text_to_sql import prompts
 from text_to_sql.executor import NonRetryableError, QueryExecutor, RetryableError
-from text_to_sql.llm import LLMClient, LLMError
+from text_to_sql.llm import LLMCall, LLMClient, LLMError
 from text_to_sql.schema_provider import SchemaProvider
 from text_to_sql.validator import DEFAULT_BLOCKED_FUNCTIONS, SQLValidator
 
@@ -30,6 +30,9 @@ class Attempt:
     error: str | None = None
     llm_ms: int | None = None
     db_ms: int | None = None
+    # The model that answered, and every HTTP call behind it (retries, fallbacks)
+    model: str | None = None
+    llm_calls: list[LLMCall] = field(default_factory=list)
 
 
 @dataclass
@@ -114,18 +117,19 @@ class TextToSQLAgent:
             try:
                 reply = self.llm.generate(system, user)
             except LLMError as e:
-                attempts.append(Attempt(None, str(e), llm_ms=_ms_since(started)))
+                attempts.append(Attempt(None, str(e), _ms_since(started), llm_calls=e.calls))
                 return Answer("error", question, message=str(e), attempts=attempts)
-            llm_ms = _ms_since(started)
+            llm = {"llm_ms": _ms_since(started), "model": reply.model, "llm_calls": reply.calls}
 
-            reason = cannot_answer_reason(reply)
+            reason = cannot_answer_reason(reply.text)
             if reason is not None:
+                attempts.append(Attempt(None, **llm))
                 return Answer("cannot_answer", question, message=reason, attempts=attempts)
 
-            sql = extract_sql(reply)
+            sql = extract_sql(reply.text)
             result = validator.validate(sql)
             if not result.ok:
-                attempts.append(Attempt(sql, result.error, llm_ms))
+                attempts.append(Attempt(sql, result.error, **llm))
                 previous_sql, previous_error = sql, result.error
                 continue
 
@@ -133,14 +137,14 @@ class TextToSQLAgent:
             try:
                 rows = self.executor.run(result.sql)
             except RetryableError as e:
-                attempts.append(Attempt(result.sql, str(e), llm_ms, _ms_since(started)))
+                attempts.append(Attempt(result.sql, str(e), db_ms=_ms_since(started), **llm))
                 previous_sql, previous_error = result.sql, str(e)
                 continue
             except NonRetryableError as e:
-                attempts.append(Attempt(result.sql, str(e), llm_ms, _ms_since(started)))
+                attempts.append(Attempt(result.sql, str(e), db_ms=_ms_since(started), **llm))
                 return Answer("error", question, sql=result.sql, message=str(e), attempts=attempts)
 
-            attempts.append(Attempt(result.sql, None, llm_ms, _ms_since(started)))
+            attempts.append(Attempt(result.sql, None, db_ms=_ms_since(started), **llm))
             return Answer(
                 "ok",
                 question,

@@ -15,6 +15,7 @@ import json
 import sys
 import time
 from collections import Counter
+from dataclasses import asdict
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
@@ -172,9 +173,15 @@ def run_questions(items: list[dict], delay: float, log_path: Path) -> list[dict]
             "latency_ms": latency_ms,
             "sql": answer.sql,
             "message": answer.message,
+            "models": [a.model for a in answer.attempts if a.model],
+            "llm_calls": [asdict(c) for a in answer.attempts for c in a.llm_calls],
+            "llm_ms": sum(a.llm_ms or 0 for a in answer.attempts),
         })
+        calls = rows[-1]["llm_calls"]
+        failed = sum(c["error"] is not None for c in calls)
         print(f"[{n}/{len(items)}] {item['id']} {'PASS' if ok else 'FAIL'} "
-              f"({verdict}, {len(answer.attempts)} att, {latency_ms} ms)", file=sys.stderr)
+              f"({verdict}, {len(answer.attempts)} att, {latency_ms} ms, "
+              f"{','.join(rows[-1]['models']) or '-'}, {len(calls)} calls/{failed} failed)", file=sys.stderr)
         if delay and n < len(items):
             time.sleep(delay)
     return rows
@@ -204,6 +211,33 @@ def run_guardrails() -> list[dict]:
 
 
 # --- report -----------------------------------------------------------------
+
+
+def _llm_call_summary(rows: list[dict]) -> list[str]:
+    """Where the time went: which model answered, and how many HTTP calls failed and why."""
+    calls = [c for r in rows for c in r["llm_calls"]]
+    if not calls:
+        return []
+    answered = Counter(m for r in rows for m in r["models"])
+    failures = Counter(_error_kind(c["error"]) for c in calls if c["error"])
+    ok_ms = sorted(c["ms"] for c in calls if not c["error"])
+    lines = [
+        f"- Average LLM time per question: {sum(r['llm_ms'] for r in rows) / len(rows) / 1000:.1f} s",
+        "- Answered by: " + ", ".join(f"`{m}` {n}" for m, n in answered.most_common()),
+        f"- LLM HTTP calls: {len(calls)}, failed {sum(failures.values())}"
+        + (" (" + ", ".join(f"{k} {v}" for k, v in failures.most_common()) + ")" if failures else ""),
+    ]
+    if ok_ms:
+        lines.append(f"- Successful call time: median {ok_ms[len(ok_ms) // 2] / 1000:.1f} s, "
+                     f"max {ok_ms[-1] / 1000:.1f} s")
+    return lines
+
+
+def _error_kind(error: str) -> str:
+    for kind in ("timed out", "429", "500", "503", "504"):
+        if kind in error:
+            return kind
+    return "other"
 
 
 def summarize(rows: list[dict], guardrails: list[dict]) -> str:
@@ -239,6 +273,7 @@ def summarize(rows: list[dict], guardrails: list[dict]) -> str:
                 f"{sum(1 for r in rows if r['status'] == 'ok' and r['attempts'] > 1)}"
             ),
         ]
+        lines += _llm_call_summary(rows)
         llm_errors = sum(r["verdict"] == "llm_error" for r in rows)
         if llm_errors:
             lines.append(f"- **{llm_errors} questions failed on the LLM call itself "

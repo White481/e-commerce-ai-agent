@@ -44,3 +44,25 @@ def test_llm_failure_is_not_counted_as_a_safe_injection_answer():
     assert score({"expect": "injection"}, llm_down, None, "marts") == (False, "llm_error")
     assert score({"expect": "injection"}, blocked, None, "marts") == (True, "error")
     assert score({"expect": "cannot_answer"}, Answer("cannot_answer", "q"), None, "marts") == (True, "cannot_answer")
+
+
+def test_summary_shows_where_llm_time_went():
+    from evals.run_eval import summarize
+
+    def row(id_, models, calls):
+        return {"id": id_, "level": "easy", "expect": "answer", "question": "q", "ok": True,
+                "verdict": "match", "status": "ok", "attempts": 1, "latency_ms": 1000,
+                "sql": "SELECT 1", "message": None, "models": models, "llm_calls": calls,
+                "llm_ms": sum(c["ms"] for c in calls)}
+
+    rows = [
+        row("e01", ["b"], [{"model": "a", "ms": 3000, "error": "LLM request failed (503 UNAVAILABLE): busy"},
+                           {"model": "b", "ms": 2000, "error": None}]),
+        row("e02", ["a"], [{"model": "a", "ms": 30000, "error": "LLM request timed out after 30s"},
+                           {"model": "a", "ms": 4000, "error": None}]),
+    ]
+    report = summarize(rows, [])
+    assert "- Answered by: `b` 1, `a` 1" in report or "- Answered by: `a` 1, `b` 1" in report
+    assert "- LLM HTTP calls: 4, failed 2 (" in report
+    assert "503 1" in report and "timed out 1" in report
+    assert "- Average LLM time per question: 19.5 s" in report

@@ -32,12 +32,15 @@ curl -s -X POST localhost:8000/ask -H 'Content-Type: application/json' \
   "row_count": 12,
   "truncated": false,
   "message": null,
-  "attempts": [{"sql": "SELECT d.month, ...", "error": null, "llm_ms": 26333, "db_ms": 77}]
+  "attempts": [{"sql": "SELECT d.month, ...", "error": null, "llm_ms": 26333, "db_ms": 77,
+                "model": "gemini-3.5-flash-lite", "llm_calls": [{"model": "...", "ms": 26333, "error": null}]}]
 }
 ```
 
 `status` is `ok`, `cannot_answer` (the data can't answer it, e.g. "which email does each customer
-use?") or `error` (with a `message`). `attempts` shows every SQL the LLM tried and why it was rejected.
+use?") or `error` (with a `message`). `attempts` shows every SQL the LLM tried and why it was rejected,
+which model answered, and every HTTP call to the LLM behind it (retries on 429/5xx and fallbacks to
+other models), so a slow answer can be traced to its cause.
 
 ## How it works
 

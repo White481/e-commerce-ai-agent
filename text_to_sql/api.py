@@ -24,11 +24,19 @@ class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=500, examples=["ยอดขายรายเดือนปี 2011"])
 
 
+class LLMCallOut(BaseModel):
+    model: str
+    ms: int
+    error: str | None
+
+
 class AttemptOut(BaseModel):
     sql: str | None
     error: str | None
     llm_ms: int | None
     db_ms: int | None
+    model: str | None
+    llm_calls: list[LLMCallOut]
 
 
 class AskResponse(BaseModel):

@@ -13,7 +13,7 @@ from text_to_sql.agent import (
 )
 from text_to_sql.api import create_app
 from text_to_sql.executor import NonRetryableError, QueryResult, RetryableError
-from text_to_sql.llm import LLMError
+from text_to_sql.llm import LLMCall, LLMError, LLMReply
 
 TABLES = {"fact_sales", "dim_customer", "dim_product", "dim_date"}
 
@@ -28,7 +28,7 @@ class FakeLLM:
         reply = self.replies.pop(0)
         if isinstance(reply, Exception):
             raise reply
-        return reply
+        return LLMReply(reply, "fake-model", [LLMCall("fake-model", 5)])
 
 
 class FakeSchema:
@@ -248,7 +248,9 @@ def test_gemini_client_sends_thinking_level_and_timeout():
         return type("Response", (), {"text": "```sql\nSELECT 1\n```"})()
 
     client._client.models.generate_content = fake_generate_content
-    assert client.generate("system", "user") == "```sql\nSELECT 1\n```"
+    reply = client.generate("system", "user")
+    assert reply.text == "```sql\nSELECT 1\n```"
+    assert reply.model == "m" and len(reply.calls) == 1 and reply.calls[0].error is None
     assert sent["config"].thinking_config.thinking_level.value == "LOW"
     assert sent["config"].temperature == 0
     assert client._client._api_client._http_options.timeout == 1234
@@ -262,7 +264,7 @@ class FakeModel:
         self.calls += 1
         if isinstance(self.outcome, Exception):
             raise self.outcome
-        return self.outcome
+        return LLMReply(self.outcome, self.model, [LLMCall(self.model, 1)])
 
 
 def test_fallback_moves_on_only_when_overloaded():
@@ -270,7 +272,8 @@ def test_fallback_moves_on_only_when_overloaded():
 
     busy = FakeModel("a", LLMError("503 UNAVAILABLE", overloaded=True))
     ok = FakeModel("b", "SELECT 1")
-    assert FallbackLLM([busy, ok]).generate("s", "u") == "SELECT 1"
+    reply = FallbackLLM([busy, ok]).generate("s", "u")
+    assert reply.text == "SELECT 1" and reply.model == "b"
 
     bad_key = FakeModel("a", LLMError("400 INVALID_ARGUMENT"))
     unused = FakeModel("b", "SELECT 1")
@@ -285,3 +288,69 @@ def test_fallback_reports_every_busy_model():
     models = [FakeModel(m, LLMError("503", overloaded=True)) for m in ("a", "b")]
     with pytest.raises(LLMError, match=r"All models are busy\. a: 503 \| b: 503"):
         FallbackLLM(models).generate("s", "u")
+
+
+def _gemini_with(outcomes, model="m"):
+    """A GeminiClient whose HTTP call returns/raises the given outcomes in order."""
+    from text_to_sql.llm import GeminiClient
+
+    client = GeminiClient(api_key="test-key", model=model, backoff_s=0)
+    queue = list(outcomes)
+
+    def fake_generate_content(**kwargs):
+        outcome = queue.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return type("Response", (), {"text": outcome})()
+
+    client._client.models.generate_content = fake_generate_content
+    return client
+
+
+def _api_error(code, status, details=None):
+    from google.genai import errors
+
+    body = {"error": {"code": code, "message": status.lower(), "status": status, "details": details or []}}
+    return (errors.ClientError if code < 500 else errors.ServerError)(code, body)
+
+
+DAILY_QUOTA = [{"violations": [{"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]}]
+
+
+def test_gemini_retries_overload_and_records_every_call():
+    client = _gemini_with([_api_error(503, "UNAVAILABLE"), _api_error(503, "UNAVAILABLE"), "SELECT 1"])
+    reply = client.generate("s", "u")
+    assert reply.text == "SELECT 1"
+    assert [c.error is None for c in reply.calls] == [False, False, True]
+    assert "503" in reply.calls[0].error
+
+
+def test_gemini_does_not_retry_a_daily_quota_but_fallback_moves_on():
+    from text_to_sql.llm import FallbackLLM
+
+    out_of_quota = _gemini_with([_api_error(429, "RESOURCE_EXHAUSTED", DAILY_QUOTA)], model="a")
+    with pytest.raises(LLMError) as info:
+        out_of_quota.generate("s", "u")
+    assert len(info.value.calls) == 1  # no retry on the same model
+    assert info.value.overloaded and not info.value.retry_same_model
+
+    out_of_quota = _gemini_with([_api_error(429, "RESOURCE_EXHAUSTED", DAILY_QUOTA)], model="a")
+    reply = FallbackLLM([out_of_quota, _gemini_with(["SELECT 1"], model="b")]).generate("s", "u")
+    assert reply.model == "b"
+    assert [c.model for c in reply.calls] == ["a", "b"]  # the failed call is kept
+
+
+def test_attempts_show_model_and_calls_including_cannot_answer():
+    answer = make_agent(FakeLLM(sql_reply("SELECT 1"))).ask("x")
+    assert answer.attempts[0].model == "fake-model"
+    assert answer.attempts[0].llm_calls[0].ms == 5
+
+    declined = make_agent(FakeLLM("CANNOT_ANSWER no data")).ask("emails?")
+    assert declined.status == "cannot_answer"
+    assert len(declined.attempts) == 1 and declined.attempts[0].model == "fake-model"
+
+
+def test_failed_llm_calls_reach_the_answer():
+    error = LLMError("All models are busy.", overloaded=True, calls=[LLMCall("a", 30000, "timed out")])
+    answer = make_agent(FakeLLM(error)).ask("x")
+    assert answer.attempts[0].llm_calls[0].error == "timed out"
