@@ -101,6 +101,22 @@ def test_other_schemas_are_not_readable(executor, settings, table):
         pytest.fail("query on another schema succeeded")
 
 
+def test_session_settings_do_not_leak_between_queries(engine, settings):
+    """set_config() is allowed for any role; the pool must reset it on check-in."""
+    engine = create_agent_engine(settings.agent_db_url(), pool_size=1)
+    executor = QueryExecutor(engine, row_limit=5, timeout_ms=1000)
+    try:
+        executor.run("SELECT set_config('default_transaction_read_only', 'off', false)")
+        executor.run("SELECT set_config('statement_timeout', '0', false)")
+        result = executor.run(
+            "SELECT current_setting('default_transaction_read_only'), current_setting('statement_timeout')"
+        )
+    finally:
+        engine.dispose()
+    # 1s = this executor's SET LOCAL timeout; '0' would mean the setting leaked
+    assert result.rows == [["on", "1s"]]
+
+
 def test_slow_query_hits_statement_timeout(executor):
     with pytest.raises(NonRetryableError, match="timed out"):
         executor.run("SELECT pg_sleep(3)")

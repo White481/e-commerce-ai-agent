@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 
@@ -43,8 +43,21 @@ class QueryResult:
     truncated: bool
 
 
-def create_agent_engine(url) -> Engine:
-    return create_engine(url, pool_pre_ping=True, pool_size=5)
+def create_agent_engine(url, pool_size: int = 5) -> Engine:
+    engine = create_engine(url, pool_pre_ping=True, pool_size=pool_size)
+
+    @event.listens_for(engine, "checkin")
+    def _reset_session(dbapi_conn, _record):
+        # Any role may change its own session settings (e.g. set_config(...,
+        # false)); don't let that leak to the next query on this pooled connection.
+        # RESET ALL is transactional, hence the commit.
+        if dbapi_conn is None:
+            return
+        with dbapi_conn.cursor() as cursor:
+            cursor.execute("RESET ALL")
+        dbapi_conn.commit()
+
+    return engine
 
 
 class QueryExecutor:
