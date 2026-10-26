@@ -18,8 +18,11 @@ class LLMClient(Protocol):
 class GeminiClient:
     def __init__(self, api_key: str, model: str):
         from google import genai  # imported here so tests without the key don't need it
+        from google.genai import types
 
-        self._client = genai.Client(api_key=api_key)
+        # 429 / 5xx (e.g. 503 "model overloaded") are common and short-lived: back off and retry
+        retry = types.HttpRetryOptions(attempts=4, initial_delay=1.0, max_delay=8.0)
+        self._client = genai.Client(api_key=api_key, http_options=types.HttpOptions(retry_options=retry))
         self.model = model
 
     def generate(self, system: str, user: str) -> str:
@@ -33,7 +36,7 @@ class GeminiClient:
                 config=types.GenerateContentConfig(system_instruction=system, temperature=0),
             )
         except errors.APIError as e:
-            raise LLMError(f"LLM request failed ({e.code})") from e
+            raise LLMError(f"LLM request failed ({e.code} {e.status}): {e.message}") from e
         return response.text or ""
 
 
