@@ -22,7 +22,7 @@ class Settings(BaseSettings):
 
     agent_db_user: str = "analyst_ro"
     agent_db_password: SecretStr = SecretStr("")
-    warehouse_schema: str = "public"
+    warehouse_schema: str = "marts"
 
     llm_provider: str = "gemini"
     llm_model: str = ""
