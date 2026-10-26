@@ -1,6 +1,6 @@
 """Integration: the DB itself must refuse writes, even with the validator bypassed.
 
-Needs the docker Postgres and the analyst_ro role (make up && make agent-role).
+Needs the pipeline's Postgres (make up in e-commerce-data-pipeline) and make agent-role here.
 Skipped when the database is not reachable, e.g. in CI.
 """
 
