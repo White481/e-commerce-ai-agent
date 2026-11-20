@@ -12,6 +12,8 @@ The warehouse is the dbt star schema (`marts`) built by my
 This project is a separate consumer of that warehouse: it only depends on the `marts` tables and its
 own read-only role, never on the pipeline's code.
 
+![Web UI answering "ยอดขายรายเดือนปี 2011": generated SQL and the result table](docs/web_ui.png)
+
 **Stack:** Python 3.12/3.14 · FastAPI · PostgreSQL 16 · SQLAlchemy 2 + psycopg 3 · sqlglot ·
 Google Gemini (`google-genai`) · pytest · ruff · GitHub Actions
 
